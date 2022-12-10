@@ -190,6 +190,9 @@ struct SDF {
     // input verts)
     Eigen::VectorXi nn(Eigen::Ref<const Points> points) const;
 
+    std::tuple<Points, Eigen::VectorXi> closest_point(Eigen::Ref<const Points> points,
+                        bool trunc_aabb = false) const;
+
     // Return 1 for each point inside/on surface of the mesh and 0 for outside.
     //
     // @param points input points

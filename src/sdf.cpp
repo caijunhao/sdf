@@ -8,6 +8,7 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
+#include <tuple>
 #include "sdf/internal/RTree.h"
 #include "sdf/internal/sdf_util.hpp"
 
@@ -151,6 +152,63 @@ struct SDF::Impl {
             },
             (int)points.rows());
         return result;
+    }
+
+    std::tuple<Points, Eigen::VectorXi> closest_point(Eigen::Ref<const Points> points,
+                bool trunc_aabb = false) const {
+        Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor> nn_points(
+                points.rows(), 3);
+        Eigen::VectorXi nn_faces(points.rows());
+
+        maybe_parallel_for(
+                [&](int i) {
+                    size_t neighb_index;
+                    float _dist;
+                    nanoflann::KNNResultSet<float> result_set(1);
+
+                    auto point = points.row(i);
+
+                    float sign;
+                    sign = _raycast(point);
+
+                    float min_dist = std::numeric_limits<float>::max();
+                    if (trunc_aabb) {
+                        // Only care about sign being correct, so we can use
+                        // AABB
+                        for (int t = 0; t < 3; ++t) {
+                            if (point[t] < aabb[t] || point[t] > aabb[t + 3]) {
+                                // Out of mesh's bounding box
+                                min_dist = -std::numeric_limits<float>::max();
+                                continue;
+                            }
+                        }
+                    }
+
+                    result_set.init(&neighb_index, &_dist);
+                    kd_tree.index->findNeighbors(result_set, point.data(),
+                                                 nanoflann::SearchParams(10));
+
+                    Eigen::Matrix<float, 1, 3, Eigen::RowMajor> selected_face_normal;
+                    Eigen::Matrix<float, 3, 3, Eigen::RowMajor> face_tri;
+                    for (int faceid : adj_faces[neighb_index]) {
+                        const auto face = faces.row(faceid);
+
+                        const auto normal = face_normal.row(faceid);
+                        const float tridist = util::dist_point2tri<float>(
+                                point, verts.row(face(0)), verts.row(face(1)),
+                                verts.row(face(2)), normal, face_area[faceid]);
+                        if (tridist < min_dist) {
+                            min_dist = tridist;
+                            selected_face_normal.noalias() = normal;
+                            nn_faces[i] = faceid;
+                        }
+                    }
+                    min_dist = std::sqrt(min_dist);
+                    min_dist *= sign;
+                    nn_points.row(i).noalias() = point + selected_face_normal.normalized() * min_dist;
+                },
+                (int)points.rows());
+        return std::make_tuple(std::move(nn_points), std::move(nn_faces));
     }
 
     Eigen::Matrix<bool, Eigen::Dynamic, 1> contains(
@@ -374,6 +432,10 @@ Vector SDF::operator()(Eigen::Ref<const Points> points, bool trunc_aabb) const {
 
 Eigen::VectorXi SDF::nn(Eigen::Ref<const Points> points) const {
     return p_impl->nn(points);
+}
+
+std::tuple<Points, Eigen::VectorXi> SDF::closest_point(Eigen::Ref<const Points> points, bool trunc_aabb) const {
+    return p_impl->closest_point(points, trunc_aabb);
 }
 
 Eigen::Matrix<bool, Eigen::Dynamic, 1> SDF::contains(

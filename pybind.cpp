@@ -27,6 +27,8 @@ PYBIND11_MODULE(pysdf, m) {
         .def("contains", &SDF::contains, "Test if points are in mesh",
              py::arg("points"))
         .def("nn", &SDF::nn, "Find nearest neighbor indices", py::arg("points"))
+        .def("closest_point", &SDF::closest_point, "Find nearest neighbor indices", py::arg("points"),
+             py::arg("trunc_aabb") = false)
         .def("update", &SDF::update,
              "Update the SDF to reflect any changes in verts")
         .def("sample_surface", &SDF::sample_surface,
